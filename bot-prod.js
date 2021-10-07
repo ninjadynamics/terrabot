@@ -1,7 +1,7 @@
 // Because I like Python
 const print = console.log;
 
-const TESTNET = true;
+const TESTNET = false;
 const chain = TESTNET ? 'bombay-12' : 'columbus-5';
 const url = TESTNET ? 'https://bombay-lcd.terra.dev' : 'https://lcd.terra.dev';
 
