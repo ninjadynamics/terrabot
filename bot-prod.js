@@ -1,24 +1,31 @@
 // Because I like Python
 const print = console.log;
 
+// Change to 'false' for production
 const TESTNET = false;
 const chain = TESTNET ? 'bombay-12' : 'columbus-5';
 const url = TESTNET ? 'https://bombay-lcd.terra.dev' : 'https://lcd.terra.dev';
 
+// To make things easier
 const DIVISOR = 1000000;
 const DENOM = {
     'LUNA': 'uluna',
     'UST': 'uusd'
 }
 
+// Create LCD object
 const terra = new Terra.LCDClient({
     URL: url,
     chainID: chain,
 });
 
+// Initialize objects and variables
 var wallet = null;
 var mk = null;
+var orderIDs = new Set();
+var orders = {};
 
+// TODO: Use a connected wallet (walletConnect / Chrome extension) instead !!!
 function loadWallet() {
     mk = new Terra.MnemonicKey({
         // You have to set it in the console
@@ -27,6 +34,7 @@ function loadWallet() {
     wallet = terra.wallet(mk);
 }
 
+// Get the current user account balances for LUNA and UST
 async function balance() {
     const obj = await wallet.lcd.bank.balance(mk.accAddress);
     const out = {}
@@ -36,11 +44,13 @@ async function balance() {
     return out;
 }
 
+// Get the current LUNA price in UST
 async function price() {
     const obj = await wallet.lcd.market.swapRate(new Terra.Coin('uluna', '1000000'), 'uusd');
     return parseFloat(obj.toData().amount) / DIVISOR;
 }
 
+// Market swap function
 function swap(amount, from, to) {
     const coin = new Terra.Coin(DENOM[from.toUpperCase()], amount * DIVISOR);
     const msg = new Terra.MsgSwap(mk.accAddress, coin, DENOM[to.toUpperCase()]);
@@ -55,34 +65,52 @@ function swap(amount, from, to) {
     });
 }
 
-function sellAt(amountLuna, target) {
-    async function _sell(amount, target) {
+// Create swap order
+async function swapAt(order) {
+    const p = await price();
+    order.from = order.from.toUpperCase();
+    order.to = order.to.toUpperCase();
+    order.timestamp = Date.now();
+    const expr = order.target > p ? '>=' : '<=';
+    async function _swapAt(order) {
         const p = await price();
-        print('Current LUNA price:', p);
-        if (p >= target) {
-            print('Selling', amount, 'LUNA at', p, 'UST');
-            swap(amount, 'luna', 'ust')
-            clearInterval(sellID);
+        print(`[ ${orderID} ] Swap ${desc} (Now: $${p})`);
+        if (eval(`${p} ${expr} ${order.target}`)) {
+            cancel(orderID);
+            print(`Swapping ${order.amount} ${order.from} for ${order.to} at $${p} per LUNA`);
+            swap(order.amount, order.from, order.to);
         }
     }
-    print('Creating sell order of', amountLuna, 'LUNA at', target, 'UST');
-    var sellID = setInterval(_sell, 2000, amountLuna, target);
+    var orderID = setInterval(_swapAt, 2000, order);
+    var desc = `${order.amount} ${order.from} for ${order.to} at $${order.target} per LUNA`
+    print(`Creating swap order of ${desc}`);
+    print(`Trigger: price ${expr} ${order.target}`);
+    print(`Order id: ${orderID}`);
+    orders[orderID] = order;
+    orderIDs.add(orderID);
+    return orderID;
 }
 
-function buyAt(amountUST, target) {
-    async function _buy(amount, target) {
-        const p = await price();
-        print('Current LUNA price:', p);
-        if (p <= target) {
-            print('Buying', amount / p, 'LUNA at', p, 'UST');
-            swap(amount, 'ust', 'luna')
-            clearInterval(buyID);
-        }
+// Cancel the last order (or any given one)
+function cancel(orderID) {
+    if (!orderID) orderID = Array.from(orderIDs).pop();
+    print(`Cancelling order ${orderID}`);
+    clearInterval(orderID);
+    orderIDs.delete(orderID);
+    delete orders[orderID];
+}
+
+// Cancel all orders
+function cancelAll() {
+    print(`Cancelling all orders`);
+    for (const id of orderIDs) {
+        clearInterval(id);
     }
-    print('Creating buy order of', (amountUST / target), 'LUNA at', target, 'UST');
-    var buyID = setInterval(_buy, 2000, amountUST, target);
+    orderIDs.clear();
+    orders = {};
 }
 
+// Start the bot
 async function start() {
     loadWallet();
     var b = await balance();
